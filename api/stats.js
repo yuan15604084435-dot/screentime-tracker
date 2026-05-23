@@ -1,48 +1,40 @@
-import { list } from '@vercel/blob';
+import { sql } from '@vercel/postgres';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   
   try {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
     
-    // 读取今天的记录
-    const blobPath = `records/${today}`;
+    // 创建表（如果不存在）
+    await sql`
+      CREATE TABLE IF NOT EXISTS app_sessions (
+        id SERIAL PRIMARY KEY,
+        app TEXT NOT NULL,
+        opened_at TIMESTAMP NOT NULL,
+        closed_at TIMESTAMP,
+        duration_seconds INTEGER,
+        date TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
     
-    const { blobs } = await list({ prefix: blobPath });
-    
-    if (blobs.length === 0) {
-      return res.json({
-        date: today,
-        message: '今天还没有使用记录',
-        records: []
-      });
-    }
-    
-    // 获取记录内容
-    const response = await fetch(blobs[0].url);
-    const records = await response.json();
-    
-    // 统计每个APP的使用情况
-    const stats = {};
-    
-    records.forEach(record => {
-      if (!stats[record.app]) {
-        stats[record.app] = {
-          times: 0,
-          timestamps: []
-        };
-      }
-      stats[record.app].times++;
-      stats[record.app].timestamps.push(record.time);
-    });
+    // 查询今天的使用统计
+    const result = await sql`
+      SELECT 
+        app,
+        COUNT(*) as times,
+        SUM(duration_seconds) as total_seconds
+      FROM app_sessions
+      WHERE date = ${today} AND duration_seconds IS NOT NULL
+      GROUP BY app
+      ORDER BY total_seconds DESC
+    `;
     
     return res.json({
       date: today,
-      totalActions: records.length,
-      apps: stats,
-      rawRecords: records
+      apps: result.rows,
+      total_apps: result.rows.length
     });
     
   } catch (error) {
