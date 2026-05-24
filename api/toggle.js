@@ -10,12 +10,25 @@ export default async function handler(req, res) {
   }
   
   try {
+    // 先确保表存在
+    await sql`
+      CREATE TABLE IF NOT EXISTS app_sessions (
+        id SERIAL PRIMARY KEY,
+        app TEXT NOT NULL,
+        opened_at TIMESTAMPTZ NOT NULL,
+        closed_at TIMESTAMPTZ,
+        duration_seconds INTEGER,
+        date TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )
+    `;
+    
     const now = new Date();
     const timestamp = now.toISOString();
-    const date = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const date = now.toISOString().split('T')[0];
     
-    // 检查是否有未关闭的 session
-    const openSession = await sql`
+    // 查找未关闭的session
+    const result = await sql`
       SELECT id, opened_at 
       FROM app_sessions 
       WHERE app = ${appName} AND closed_at IS NULL 
@@ -23,9 +36,9 @@ export default async function handler(req, res) {
       LIMIT 1
     `;
     
-    if (openSession.rows.length > 0) {
-      // 有未关闭的 session，现在关闭它
-      const session = openSession.rows[0];
+    if (result.rows.length > 0) {
+      // 关闭session
+      const session = result.rows[0];
       const openedAt = new Date(session.opened_at);
       const durationSeconds = Math.floor((now - openedAt) / 1000);
       
@@ -38,11 +51,10 @@ export default async function handler(req, res) {
       return res.json({
         message: `${appName} 已关闭`,
         action: 'close',
-        duration_seconds: durationSeconds,
-        time: timestamp
+        duration_seconds: durationSeconds
       });
     } else {
-      // 没有未关闭的 session，创建新的
+      // 创建新session
       await sql`
         INSERT INTO app_sessions (app, opened_at, date)
         VALUES (${appName}, ${timestamp}, ${date})
@@ -50,36 +62,13 @@ export default async function handler(req, res) {
       
       return res.json({
         message: `${appName} 已打开`,
-        action: 'open',
-        time: timestamp
+        action: 'open'
       });
     }
     
   } catch (error) {
     return res.status(500).json({ 
       error: '操作失败', 
-      details: error.message 
-    });
-  }
-}
-    });
-    
-    // 保存到 Blob Storage
-    await put(blobPath, JSON.stringify(todayRecords), {
-      access: 'public',
-      addRandomSuffix: false
-    });
-    
-    return res.json({
-      message: `${appName} 记录成功`,
-      time: timestamp,
-      app: appName,
-      totalRecords: todayRecords.length
-    });
-    
-  } catch (error) {
-    return res.status(500).json({ 
-      error: '记录失败', 
       details: error.message 
     });
   }
